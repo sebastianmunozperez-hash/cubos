@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ciudad de cubos: planta y volumen</title>
+<title>Ciudad de cubos: realidad aumentada</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -178,62 +178,12 @@
 
 <header class="masthead">
   <h1>Ciudad de cubos</h1>
-  <p>Placas de suelo 3 × 3 / cinco colores / planta, volumen y cuadro de superficies</p>
+  <p>Realidad aumentada anclada en el impreso de la calle</p>
 </header>
 
 <div class="layout">
-
-  <section>
-    <p class="panel-label"><span>Planta</span><b>lo que ve la cámara desde arriba</b></p>
+  <section class="span-all">
     <div class="formats" id="formats"></div>
-    <div class="tools" id="tools"></div>
-    <p class="message quiet" id="msg">Cada placa trae su calle en un borde. Gírala con el botón de la esquina y rellena los negros.</p>
-    <div class="board"><div class="plates" id="plates"></div></div>
-    <p class="hint">El número son los pisos: el dato que una lectura cenital no puede ver. El negro es suelo libre, y se contabiliza como estacionamiento.</p>
-  </section>
-
-  <section>
-    <p class="panel-label"><span>Volumen</span><b>arrastra para girar</b></p>
-    <canvas id="view"></canvas>
-    <p class="hint" id="viewHint">Rueda o pinza para acercar.</p>
-  </section>
-
-  <section class="span-all">
-    <p class="panel-label"><span>Lectura por cámara</span><b>de la maqueta a la planta</b></p>
-    <div class="cam">
-      <div>
-        <canvas id="feed" width="640" height="480"></canvas>
-        <p class="hint" id="camMsg">Abre la cámara o carga una foto de la maqueta tomada desde arriba.</p>
-      </div>
-      <div>
-        <div class="cam-step">
-          <h3><span>1</span> &nbsp;Fuente</h3>
-          <div class="cam-row">
-            <button class="btn" id="btnCam" type="button">Abrir cámara</button>
-            <button class="btn" id="btnStop" type="button">Detener</button>
-            <input class="btn" id="inPhoto" type="file" accept="image/*" style="width:160px;padding:6px">
-          </div>
-        </div>
-        <div class="cam-step">
-          <h3><span>2</span> &nbsp;Marco</h3>
-          <p class="hint" style="margin:0">Arrastra los cuatro vértices hasta las esquinas del conjunto de placas, en orden: superior izquierda, superior derecha, inferior derecha, inferior izquierda. La retícula sigue el formato elegido arriba.</p>
-        </div>
-        <div class="cam-step">
-          <h3><span>3</span> &nbsp;Calibrar colores</h3>
-          <p class="hint" style="margin:0 0 8px">Elige un material y toca esa pieza en la imagen. Los cinco, bajo la misma luz.</p>
-          <div class="swatches" id="swatches"></div>
-        </div>
-        <div class="cam-step">
-          <h3><span>4</span> &nbsp;Leer</h3>
-          <button class="btn primary" id="btnRead" type="button">Leer maqueta</button>
-          <p class="hint" style="margin-top:8px">La orientación de cada placa se deduce de dónde cae la línea gris, no hace falta que la ajustes antes.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="span-all">
-    <p class="panel-label"><span>Realidad aumentada</span><b>anclada en la franja gris</b></p>
     <div class="cam">
       <div>
         <div class="ar-stage" id="arStage">
@@ -242,22 +192,11 @@
           <canvas id="arOv"></canvas>
           <div class="ar-status" id="arStatus">Detenida</div>
         </div>
-        <p class="hint" id="arHint">Apunta a la maqueta manteniendo visible la franja gris de la calle. El modelo se ancla en ella.</p>
+        <p class="hint" id="arHint">Apunta a la maqueta manteniendo visible el impreso de la calle. El modelo se ancla en él.</p>
       </div>
       <div>
         <div class="cam-step">
-          <h3><span>1</span> &nbsp;Cómo se ancla</h3>
-          <p class="hint" style="margin:0 0 8px">Reconoce el impreso de la calle por su dibujo, no por su color: extrae sus rasgos y los empareja con lo que ve la cámara. Aguanta que los cubos lo tapen en parte y no necesita calibración.</p>
-          <div class="cam-row">
-            <label style="font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim)">
-              Otro impreso
-              <input class="btn" id="inRef" type="file" accept="image/*" style="width:150px;padding:6px;display:block;margin-top:4px">
-            </label>
-          </div>
-          <p class="hint" style="margin-top:8px">Si cambias el diseño de la calle, carga aquí una foto del impreso solo, plano y de frente.</p>
-        </div>
-        <div class="cam-step">
-          <h3><span>2</span> &nbsp;Control</h3>
+          <h3><span>1</span> &nbsp;Control</h3>
           <div class="cam-row">
             <button class="btn primary" id="btnAr" type="button">Abrir cámara</button>
             <button class="btn" id="btnArStop" type="button">Detener</button>
@@ -267,27 +206,41 @@
           <p class="hint" style="margin-top:8px">Si el modelo aparece del lado equivocado de la calle, toca Voltear.</p>
         </div>
         <div class="cam-step">
-          <h3><span>3</span> &nbsp;Ajuste</h3>
+          <h3><span>2</span> &nbsp;Ajuste</h3>
           <div class="assumptions" style="margin:0">
             <label>Campo de visión<span id="fovOut" style="font-size:15px;color:var(--ink)">estimando</span></label>
             <label>Suavizado<input id="inSmooth" type="number" min="0" max="0.9" step="0.05" value="0.65"></label>
           </div>
-          <p class="hint" style="margin-top:8px">El campo de visión se calcula solo a partir de la franja: un rectángulo de proporción conocida ya contiene la óptica de la cámara. Se afina en unos segundos y no hay que tocarlo.</p>
+          <p class="hint" style="margin-top:8px">El campo de visión se calcula solo a partir del impreso. No hay que tocarlo.</p>
+        </div>
+        <div class="cam-step">
+          <h3><span>3</span> &nbsp;Otro impreso</h3>
+          <input class="btn" id="inRef" type="file" accept="image/*" style="width:170px;padding:6px">
+          <p class="hint" style="margin-top:8px">Si cambias el diseño de la calle, carga una foto del impreso solo, plano y de frente.</p>
         </div>
       </div>
     </div>
   </section>
+</div>
 
-  <section class="span-all">
-    <p class="panel-label"><span>Escala</span><b>fija en el sistema</b></p>
-    <p class="hint" style="margin:0 0 14px">Módulo de 9 × 9 m, piso de 3 m de altura, vivienda de 81 m². Como el módulo mide justo lo que una vivienda, cada piso de madera es una vivienda exacta.</p>
-    <table id="cuadro"><caption>Cuadro de superficies y usos</caption><tbody></tbody></table>
-    <div class="actions">
-      <button class="btn" id="btnExample" type="button">Cargar ejemplo</button>
-      <button class="btn" id="btnClear" type="button">Vaciar</button>
-    </div>
-  </section>
-
+<!-- El modelo, el editor de planta y el cuadro siguen existiendo porque la
+     realidad aumentada proyecta ese modelo, pero no se muestran. -->
+<div hidden aria-hidden="true">
+  <div id="plates"></div>
+  <div id="tools"></div>
+  <p id="msg"></p>
+  <canvas id="view"></canvas>
+  <p id="viewHint"></p>
+  <canvas id="feed"></canvas>
+  <p id="camMsg"></p>
+  <button id="btnCam" type="button"></button>
+  <button id="btnStop" type="button"></button>
+  <input id="inPhoto" type="file">
+  <div id="swatches"></div>
+  <button id="btnRead" type="button"></button>
+  <table id="cuadro"><tbody></tbody></table>
+  <button id="btnExample" type="button"></button>
+  <button id="btnClear" type="button"></button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -321,6 +274,7 @@ var NAME = {
   com:"Comercio o servicio"
 };
 
+var soloRA = true;   // esta versión muestra solamente la realidad aumentada
 var fmt = FORMATS[1];
 var W = 3 * fmt.mc, H = 3 * fmt.mr;
 var plates = [];   // {rot:0..3} por placa
@@ -549,6 +503,7 @@ function setFormat(f){
     el.setAttribute("aria-pressed", String(el.dataset.f === fmt.id));
   });
   say("Tablero de " + fmt.label + ": " + (fmt.mc*fmt.mr) + " placa" + (fmt.mc*fmt.mr>1?"s":"") + ".", true);
+  if(soloRA){ example(); render(); ultQuad = null; lastPose = null; smoothQuad = null; }
 }
 FORMATS.forEach(function(f){
   var b = document.createElement("button");
@@ -785,7 +740,7 @@ function resize(){
   camera.updateProjectionMatrix();
 }
 function frame(){
-  if(ok3D){
+  if(ok3D && !soloRA){
     camera.position.set(
       radius*Math.sin(phi)*Math.cos(theta),
       radius*Math.cos(phi),
@@ -928,7 +883,7 @@ function drawOverlay(){
 }
 
 function paint(){ if(!fctx) return; drawFrame(); drawOverlay(); }
-function loop(){ if(video && !still) paint(); requestAnimationFrame(loop); }
+function loop(){ if(soloRA) return; if(video && !still) paint(); requestAnimationFrame(loop); }
 
 function medianPatch(img,x,y,rad){
   var rs=[],gs=[],bs=[],px,py,o;
@@ -1164,7 +1119,7 @@ document.getElementById("inRef").addEventListener("change", function(e){
 });
 
 cargarReferencia(REF_B64, function(n){
-  if(!n) arSay("No se pudo preparar la referencia", true);
+  arSay(n ? "Referencia lista: " + n + " rasgos" : "No se pudo preparar la referencia", !n);
 });
 
 
@@ -1374,7 +1329,7 @@ var wctx = work.getContext("2d", {willReadFrequently:true});
 var smoothQuad = null, lostFrames = 0, flip = 0, lastPose = null;
 var arSized = {w:0, h:0};
 var focalSuave = null, focalUsada = 0;
-var ultInliers = 0, ultRasgos = 0, ultQuad = null;
+var ultInliers = 0, ultRasgos = 0, ultPares = 0, ultQuad = null;
 var arOv = document.getElementById("arOv");
 var octx = arOv ? arOv.getContext("2d") : null;
 
@@ -1913,11 +1868,14 @@ function arFrame(){
       }
     }
 
-    var B = extraerRasgos(fuente, fw, fh, [1], 280, 20);
+    var escalasQ = (ox || oy) ? [1] : [1, 0.6];   // de cerca el impreso se ve enorme
+    var B = extraerRasgos(fuente, fw, fh, escalasQ, 280, 20);
     if(ox || oy) B.forEach(function(p){ p.x += ox; p.y += oy; });
-    var r = ransac(emparejar(refRasgos, B), refRasgos, B, 300, 4);
+    var pares = emparejar(refRasgos, B);
+    var r = ransac(pares, refRasgos, B, 300, 4);
     ultInliers = r ? r.inliers : 0;
     ultRasgos = B.length;
+    ultPares = pares.length;
     if(r){
       det = {quad:[[0,0],[refW,0],[refW,refH],[0,refH]].map(function(p){ return aplicarH(r.H, p); })};
       ultQuad = det.quad;
@@ -1928,9 +1886,11 @@ function arFrame(){
 
   if(!det || !anchor){
     lostFrames++;
-    if(lostFrames > 12){
+    if(lostFrames > 6){
       smoothQuad = null;
-      arSay(refRasgos ? "Buscando el impreso de la calle" : "Cargando la referencia", true);
+      if(!refRasgos) arSay("Referencia sin cargar", true);
+      else if(!anchor) arSay("El tablero no tiene calle", true);
+      else arSay("Buscando: " + ultRasgos + " rasgos, " + ultPares + " pares, " + ultInliers + " inliers", true);
     }
     dibujarContorno(null);
     pintarModelo();
