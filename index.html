@@ -136,7 +136,11 @@
   }
   .ar-stage video, .ar-stage canvas{
     position:absolute;top:0;left:0;width:100%;height:100%;display:block;
+    pointer-events:none;
   }
+  .ar-stage #arVideo{z-index:0}
+  .ar-stage #arGL{z-index:1}
+  .ar-stage #arOv{z-index:2}
   .ar-stage video{object-fit:fill}
   .ar-status{
     position:absolute;left:8px;bottom:8px;z-index:2;
@@ -233,8 +237,9 @@
     <div class="cam">
       <div>
         <div class="ar-stage" id="arStage">
-          <video id="arVideo" playsinline muted></video>
+          <video id="arVideo" playsinline muted autoplay></video>
           <canvas id="arGL"></canvas>
+          <canvas id="arOv"></canvas>
           <div class="ar-status" id="arStatus">Detenida</div>
         </div>
         <p class="hint" id="arHint">Apunta a la maqueta manteniendo visible la franja gris de la calle. El modelo se ancla en ella.</p>
@@ -256,10 +261,10 @@
         <div class="cam-step">
           <h3><span>3</span> &nbsp;Ajuste</h3>
           <div class="assumptions" style="margin:0">
-            <label>Campo de visión (°)<input id="inFov" type="number" min="40" max="90" step="1" value="65"></label>
+            <label>Campo de visión<span id="fovOut" style="font-size:15px;color:var(--ink)">estimando</span></label>
             <label>Suavizado<input id="inSmooth" type="number" min="0" max="0.9" step="0.05" value="0.65"></label>
           </div>
-          <p class="hint" style="margin-top:8px">El campo de visión depende del teléfono: si el modelo calza en la franja pero se abre o se cierra hacia el fondo, corrígelo aquí.</p>
+          <p class="hint" style="margin-top:8px">El campo de visión se calcula solo a partir de la franja: un rectángulo de proporción conocida ya contiene la óptica de la cámara. Se afina en unos segundos y no hay que tocarlo.</p>
         </div>
       </div>
     </div>
@@ -1142,13 +1147,17 @@ var arVideo  = document.getElementById("arVideo");
 var arGL     = document.getElementById("arGL");
 var arStage  = document.getElementById("arStage");
 var arStatus = document.getElementById("arStatus");
-var inFov    = document.getElementById("inFov");
+var fovEl    = document.getElementById("fovOut");
 var inSmooth = document.getElementById("inSmooth");
 
 var arStream = null, arRenderer = null, arCam = null, arOn = false;
 var work = document.createElement("canvas");
 var wctx = work.getContext("2d", {willReadFrequently:true});
-var smoothQuad = null, lostFrames = 0, flip = 0;
+var smoothQuad = null, lostFrames = 0, flip = 0, lastPose = null;
+var arSized = {w:0, h:0};
+var focalSuave = null, focalUsada = 0;
+var arOv = document.getElementById("arOv");
+var octx = arOv ? arOv.getContext("2d") : null;
 
 function arSay(t, lost){
   arStatus.textContent = t;
@@ -1225,31 +1234,9 @@ function otsu(hist, total){
   return thr;
 }
 
-function detectStrip(img){
-  var w = img.width, h = img.height, n = w*h, i, o;
-  var L = new Uint8Array(n), acro = new Uint8Array(n);
-  var hist = new Int32Array(256), total = 0;
-
-  for(i=0;i<n;i++){
-    o = i*4;
-    var r = img.data[o], g = img.data[o+1], b = img.data[o+2];
-    var mx = r>g ? (r>b?r:b) : (g>b?g:b);
-    var mn = r<g ? (r<b?r:b) : (g<b?g:b);
-    L[i] = (mx+mn)>>1;
-    var sat = mx ? (mx-mn)/mx : 0;
-    if(sat < 0.22){ acro[i] = 1; hist[L[i]]++; total++; }
-  }
-  if(total < n*0.04) return null;              // casi nada acromático a la vista
-
-  var thr = otsu(hist, total);
-  if(thr < 70) thr = 70;                       // el gris del cartón nunca es oscuro
-
-  var mask = new Uint8Array(n);
-  for(i=0;i<n;i++) if(acro[i] && L[i] > thr) mask[i] = 1;
-
-  // componentes conexas
-  var label = new Int32Array(n), sizes = [0], cur = 0;
-  var stack = new Int32Array(n), sp;
+function componentes(mask, w, h){
+  var n = w*h, label = new Int32Array(n), sizes = [0], cur = 0;
+  var stack = new Int32Array(n), sp, i;
   for(i=0;i<n;i++){
     if(!mask[i] || label[i]) continue;
     cur++; sp = 0; stack[sp++] = i; label[i] = cur;
@@ -1264,25 +1251,88 @@ function detectStrip(img){
     }
     sizes[cur] = size;
   }
+  return {label:label, sizes:sizes, count:cur};
+}
 
+function detectStrip(img){
+  var w = img.width, h = img.height, n = w*h, i, o, v;
+  var L = new Uint8Array(n), acro = new Uint8Array(n);
+  var hist = new Int32Array(256), total = 0;
+
+  for(i=0;i<n;i++){
+    o = i*4;
+    var r = img.data[o], g = img.data[o+1], b = img.data[o+2];
+    var mx = r>g ? (r>b?r:b) : (g>b?g:b);
+    var mn = r<g ? (r<b?r:b) : (g<b?g:b);
+    L[i] = (mx+mn)>>1;
+    var sat = mx ? (mx-mn)/mx : 0;
+    if(sat < 0.24){ acro[i] = 1; hist[L[i]]++; total++; }
+  }
+  if(total < n*0.04) return null;
+
+  // Con la maqueta sobre base blanca hay tres niveles acromáticos: el negro de
+  // la placa, el gris de la calle y el blanco de la base. Dos cortes seguidos.
+  var thrOscuro = otsu(hist, total);
+  if(thrOscuro < 60) thrOscuro = 60;
+
+  var hist2 = new Int32Array(256), total2 = 0;
+  for(v=thrOscuro+1; v<256; v++){ hist2[v] = hist[v]; total2 += hist[v]; }
+  var thrClaro = (total2 > total*0.15) ? otsu(hist2, total2) : 255;
+
+  var nBlanco = 0;
+  for(v=thrClaro+1; v<256; v++) nBlanco += hist[v];
+  // Para dar por buena una base blanca hace falta que sea grande y claramente
+  // más luminosa que el gris: si no, es sólo un brillo sobre el cartón.
+  var sumBlanco = 0, sumGris = 0, nGrisBanda = 0;
+  for(v=thrClaro+1; v<256; v++) sumBlanco += v*hist[v];
+  for(v=thrOscuro+1; v<=thrClaro && v<256; v++){ sumGris += v*hist[v]; nGrisBanda += hist[v]; }
+  var medBlanco = nBlanco ? sumBlanco/nBlanco : 0;
+  var medGris = nGrisBanda ? sumGris/nGrisBanda : 0;
+  var hayBlanco = (thrClaro < 248) && (nBlanco > n*0.08) && nGrisBanda > n*0.005 && medGris > 0 && (medBlanco/medGris > 1.10);
+
+  var maskGris = new Uint8Array(n), maskBlanco = new Uint8Array(n);
+  for(i=0;i<n;i++){
+    if(!acro[i] || L[i] <= thrOscuro) continue;
+    if(hayBlanco && L[i] > thrClaro) maskBlanco[i] = 1;
+    else maskGris[i] = 1;
+  }
+
+  // La base blanca acota dónde puede estar la maqueta: cualquier gris fuera de
+  // ella es del entorno, no del sistema.
+  var caja = null;
+  if(hayBlanco){
+    var cb = componentes(maskBlanco, w, h);
+    var lbB = 0, szB = 0;
+    for(i=1;i<=cb.count;i++) if(cb.sizes[i] > szB){ szB = cb.sizes[i]; lbB = i; }
+    if(lbB && szB > n*0.02){
+      var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      for(i=0;i<n;i++){
+        if(cb.label[i] !== lbB) continue;
+        var bx = i % w, by = (i - bx)/w;
+        if(bx<x0)x0=bx; if(bx>x1)x1=bx; if(by<y0)y0=by; if(by>y1)y1=by;
+      }
+      var mx2 = (x1-x0)*0.08, my2 = (y1-y0)*0.08;
+      caja = {x0:x0-mx2, y0:y0-my2, x1:x1+mx2, y1:y1+my2};
+    }
+  }
+
+  function buscar(maskUso, caja){
+  var cg = componentes(maskUso, w, h);
   var minSize = n*0.004;
   var cands = [];
-  for(i=1;i<=cur;i++) if(sizes[i] >= minSize) cands.push(i);
+  for(i=1;i<=cg.count;i++) if(cg.sizes[i] >= minSize) cands.push(i);
   if(!cands.length) return null;
-  cands.sort(function(a,b){ return sizes[b] - sizes[a]; });
+  cands.sort(function(a,b){ return cg.sizes[b] - cg.sizes[a]; });
   cands = cands.slice(0,3);
 
   var slot = {};
   cands.forEach(function(lb,k){ slot[lb] = k; });
-  // Momentos de cada candidata, para sacar su caja rotada. Los extremos
-  // diagonales fallan cuando el rectángulo cae cerca de 45°: dos vértices
-  // colapsan en el mismo punto.
   var acc = cands.map(function(){
     return {sx:0, sy:0, sxx:0, syy:0, sxy:0, cnt:0, lsum:0,
             amin:1e9, amax:-1e9, bmin:1e9, bmax:-1e9, u:null, v:null};
   });
   for(i=0;i<n;i++){
-    var lb = label[i];
+    var lb = cg.label[i];
     if(!lb || slot[lb] === undefined) continue;
     var a = acc[slot[lb]];
     var x = i % w, y = (i - x)/w;
@@ -1299,7 +1349,7 @@ function detectStrip(img){
     a.v = [-Math.sin(th), Math.cos(th)];
   });
   for(i=0;i<n;i++){
-    var lb2 = label[i];
+    var lb2 = cg.label[i];
     if(!lb2 || slot[lb2] === undefined) continue;
     var a2 = acc[slot[lb2]];
     if(!a2.u) continue;
@@ -1315,12 +1365,11 @@ function detectStrip(img){
 
   function len(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1]); }
   function muestraFuera(a, b, dir, dist){
-    // luminancia media justo afuera del lado a-b
-    var mx2 = (a[0]+b[0])/2, my2 = (a[1]+b[1])/2, s = 0, m = 0;
+    var mx3 = (a[0]+b[0])/2, my3 = (a[1]+b[1])/2, s = 0, m = 0;
     for(var k=-2;k<=2;k++){
       var t = k/6;
-      var x = Math.round(mx2 + (b[0]-a[0])*t + dir[0]*dist);
-      var y = Math.round(my2 + (b[1]-a[1])*t + dir[1]*dist);
+      var x = Math.round(mx3 + (b[0]-a[0])*t + dir[0]*dist);
+      var y = Math.round(my3 + (b[1]-a[1])*t + dir[1]*dist);
       if(x<0||x>=w||y<0||y>=h) continue;
       s += L[y*w+x]; m++;
     }
@@ -1331,6 +1380,7 @@ function detectStrip(img){
   cands.forEach(function(lb,k){
     var a = acc[k];
     if(!a.u || !a.cnt) return;
+    if(caja && (a.cx < caja.x0 || a.cx > caja.x1 || a.cy < caja.y0 || a.cy > caja.y1)) return;
     var cx = a.cx, cy = a.cy;
     function esquina(pa, pb){
       return [cx + pa*a.u[0] + pb*a.v[0], cy + pa*a.u[1] + pb*a.v[1]];
@@ -1342,14 +1392,13 @@ function detectStrip(img){
     var largo = len(pts[0],pts[1]), ancho = len(pts[1],pts[2]);
     if(ancho < 3) return;
     var prop = largo/ancho;
-    if(prop < 1.5 || prop > 10) return;        // ni cuadrada ni un hilo
+    if(prop < 1.5 || prop > 10) return;
 
     var aq = largo*ancho;
     if(!aq) return;
-    var relleno = sizes[lb]/aq;
-    if(relleno < 0.72) return;                 // forma irregular: no es la franja
+    var relleno = cg.sizes[lb]/aq;
+    if(relleno < 0.72) return;
 
-    // uno de los lados largos debe tener el negro de la placa por fuera
     var d = ancho*0.55;
     var n1 = [-(pts[1][1]-pts[0][1]), pts[1][0]-pts[0][0]];
     var l1 = Math.hypot(n1[0],n1[1]) || 1; n1 = [n1[0]/l1, n1[1]/l1];
@@ -1357,19 +1406,30 @@ function detectStrip(img){
     var fueraA = muestraFuera(pts[0], pts[1], [n1[0]*hacia, n1[1]*hacia], d);
     var fueraB = muestraFuera(pts[2], pts[3], [-n1[0]*hacia, -n1[1]*hacia], d);
     var propio = a.lsum/a.cnt;
-    if(Math.min(fueraA, fueraB) > propio*0.75) return;   // ningún lado oscuro
+    if(Math.min(fueraA, fueraB) > propio*0.75) return;
 
-    // el lado interior es el que tiene lo oscuro por fuera
     if(fueraA < fueraB) pts = [pts[2], pts[3], pts[0], pts[1]];
 
-    var score = sizes[lb] * relleno;
+    var score = cg.sizes[lb] * relleno;
     if(score > mejorScore){
       mejorScore = score;
-      mejor = {quad:pts, area:sizes[lb], largo:largo, ancho:ancho, relleno:relleno};
+      mejor = {quad:pts, area:cg.sizes[lb], largo:largo, ancho:ancho,
+               relleno:relleno, base:!!caja};
     }
   });
 
   return mejor;
+  }
+
+  // Primero con el blanco separado; si así no aparece nada, se vuelve al corte
+  // simple, que es el caso de una maqueta sobre mesa sin base.
+  var hallazgo = hayBlanco ? buscar(maskGris, caja) : null;
+  if(!hallazgo){
+    var maskClaro = new Uint8Array(n);
+    for(i=0;i<n;i++) if(acro[i] && L[i] > thrOscuro) maskClaro[i] = 1;
+    hallazgo = buscar(maskClaro, null);
+  }
+  return hallazgo;
 }
 
 // ---- pose de la cámara a partir de la homografía
@@ -1408,6 +1468,30 @@ function homographyFromPoints(src, dst){
   }
   return [[s[0],s[1],s[2]],[s[3],s[4],s[5]],[s[6],s[7],1]];
 }
+// La homografía de un rectángulo de proporción conocida ya contiene la
+// distancia focal: r1 y r2 tienen que ser ortogonales y del mismo largo, y esas
+// dos condiciones despejan f. Se degrada cuando la vista es muy frontal, así
+// que el resultado se valida y se promedia en el tiempo.
+function focalDesde(H, cx, cy){
+  var a1=H[0][0], a2=H[1][0], a3=H[2][0];
+  var b1=H[0][1], b2=H[1][1], b3=H[2][1];
+  var A1 = a1 - cx*a3, A2 = a2 - cy*a3;
+  var B1 = b1 - cx*b3, B2 = b2 - cy*b3;
+  var cands = [];
+  if(Math.abs(a3*b3) > 1e-9){
+    var f2a = -(A1*B1 + A2*B2)/(a3*b3);
+    if(f2a > 0) cands.push(f2a);
+  }
+  if(Math.abs(a3*a3 - b3*b3) > 1e-9){
+    var f2b = (B1*B1 + B2*B2 - A1*A1 - A2*A2)/(a3*a3 - b3*b3);
+    if(f2b > 0) cands.push(f2b);
+  }
+  if(!cands.length) return null;
+  var s = 0;
+  cands.forEach(function(v){ s += v; });
+  return Math.sqrt(s/cands.length);
+}
+
 function poseFrom(Himg, K){
   var Ki = [[1/K.fx,0,-K.cx/K.fx],[0,1/K.fy,-K.cy/K.fy],[0,0,1]];
   var M = mul3(Ki, Himg);
@@ -1460,6 +1544,40 @@ function applyPose(pose){
   arCam.updateMatrixWorld(true);
 }
 
+// El modelo se dibuja en cada cuadro, aunque la detección parpadee: si no,
+// aparece y desaparece con cualquier reflejo.
+function pintarModelo(){
+  if(!arRenderer || !arCam || !lastPose) return;
+  if(lostFrames > 90){ arRenderer.clear(); return; }
+  var rect = arStage.getBoundingClientRect();
+  if(!rect.width) return;
+  if(Math.abs(arSized.w - rect.width) > 1 || Math.abs(arSized.h - rect.height) > 1){
+    arRenderer.setSize(rect.width, rect.height, false);
+    arSized = {w:rect.width, h:rect.height};
+  }
+  arRenderer.render(scene, arCam);
+}
+
+// Contorno de la franja detectada: sirve para saber en qué se está anclando.
+function dibujarContorno(quad){
+  if(!octx) return;
+  var rect = arStage.getBoundingClientRect();
+  if(rect.width && (arOv.width !== Math.round(rect.width) || arOv.height !== Math.round(rect.height))){
+    arOv.width = Math.round(rect.width);
+    arOv.height = Math.round(rect.height);
+  }
+  octx.clearRect(0, 0, arOv.width, arOv.height);
+  if(!quad || !work.width) return;
+  var sx = arOv.width/work.width, sy = arOv.height/work.height;
+  octx.strokeStyle = "rgba(28,127,166,.95)";
+  octx.lineWidth = 2;
+  octx.beginPath();
+  octx.moveTo(quad[0][0]*sx, quad[0][1]*sy);
+  for(var i=1;i<4;i++) octx.lineTo(quad[i][0]*sx, quad[i][1]*sy);
+  octx.closePath();
+  octx.stroke();
+}
+
 function arFrame(){
   if(!arOn) return;
   requestAnimationFrame(arFrame);
@@ -1481,9 +1599,12 @@ function arFrame(){
   if(!det || !anchor){
     lostFrames++;
     if(lostFrames > 12){ smoothQuad = null; arSay("Buscando la franja gris", true); }
+    dibujarContorno(null);
+    pintarModelo();          // el modelo se sostiene con la última pose buena
     return;
   }
   lostFrames = 0;
+  dibujarContorno(det.quad);
 
   // suavizado temporal: 1 px de ruido en las esquinas se amplifica en ángulo
   var s = Math.max(0, Math.min(0.9, parseFloat(inSmooth.value) || 0));
@@ -1494,14 +1615,7 @@ function arFrame(){
     return [p[0]*s + q[i][0]*(1-s), p[1]*s + q[i][1]*(1-s)];
   });
 
-  var fov = Math.max(40, Math.min(90, parseFloat(inFov.value) || 65));
-  var K = {
-    fx: (work.width/2) / Math.tan(fov*Math.PI/180/2),
-    fy: (work.width/2) / Math.tan(fov*Math.PI/180/2),
-    cx: work.width/2,
-    cy: work.height/2
-  };
-
+  var cx0 = work.width/2, cy0 = work.height/2;
   var ac = anchor.corners;
   // Dos correspondencias posibles según el sentido del cuadrilátero. La buena
   // es la que deja la cámara por encima de la mesa: la otra es físicamente
@@ -1513,29 +1627,38 @@ function arFrame(){
       : [smoothQuad[0], smoothQuad[3], smoothQuad[2], smoothQuad[1]];
     var Himg = homographyFromPoints(ac, qq);
     if(!Himg) continue;
+
+    var fEst = focalDesde(Himg, cx0, cy0);
+    var valido = fEst && isFinite(fEst) && fEst > work.width*0.35 && fEst < work.width*4;
+    var f = valido ? fEst : (focalSuave || work.width/2/Math.tan(65*Math.PI/180/2));
+    var K = {fx:f, fy:f, cx:cx0, cy:cy0};
+
     var cand = poseFrom(Himg, K);
     if(cameraHeight(cand) > 0){
       pose = cand;
+      if(valido) focalSuave = focalSuave ? focalSuave*0.9 + fEst*0.1 : fEst;
+      focalUsada = f;
       if(intento === 1) smoothQuad = qq;
       break;
     }
   }
   if(!pose){
     lostFrames++;
-    if(lostFrames > 12){ smoothQuad = null; arSay("Buscando la franja gris", true); }
+    pintarModelo();
     return;
   }
+  lastPose = pose;
 
   applyPose(pose);
-  arCam.fov = 2*Math.atan((work.height/2)/K.fy)*180/Math.PI;
+  arCam.fov = 2*Math.atan((work.height/2)/focalUsada)*180/Math.PI;
   arCam.aspect = work.width/work.height;
   arCam.updateProjectionMatrix();
-
-  var rect = arStage.getBoundingClientRect();
-  if(arRenderer.domElement.width !== Math.round(rect.width) && rect.width){
-    arRenderer.setSize(rect.width, rect.height, false);
+  if(fovEl){
+    fovEl.textContent = (2*Math.atan(cx0/focalUsada)*180/Math.PI).toFixed(0) + "°"
+      + (focalSuave ? "" : " (provisorio)");
   }
-  arRenderer.render(scene, arCam);
+
+  pintarModelo();
 
   var ratio = det.largo / Math.max(det.ancho, 1);
   var esperado = anchor.largo / anchor.ancho;
@@ -1555,22 +1678,26 @@ function startAr(){
   .then(function(s){
     arStream = s;
     arVideo.srcObject = s;
-    arVideo.play();
-    arVideo.addEventListener("loadedmetadata", function(){
-      arStage.style.aspectRatio = arVideo.videoWidth + " / " + arVideo.videoHeight;
+    var p = arVideo.play();
+    if(p && p.catch) p.catch(function(){});
+
+    function arrancar(){
+      if(arOn) return;
+      arStage.style.aspectRatio = (arVideo.videoWidth || 4) + " / " + (arVideo.videoHeight || 3);
       if(!arRenderer){
         arRenderer = new THREE.WebGLRenderer({canvas:arGL, antialias:true, alpha:true});
         arRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         arRenderer.setClearColor(0x000000, 0);
         arCam = new THREE.PerspectiveCamera(65, 4/3, 0.05, 200);
       }
-      var rect = arStage.getBoundingClientRect();
-      arRenderer.setSize(rect.width, rect.height, false);
       arOn = true;
-      smoothQuad = null;
+      smoothQuad = null; lastPose = null; lostFrames = 0;
       arSay("Buscando la franja gris", true);
       arFrame();
-    }, {once:true});
+    }
+    // si los metadatos ya llegaron, el evento no vuelve a dispararse
+    if(arVideo.videoWidth) arrancar();
+    else arVideo.addEventListener("loadedmetadata", arrancar, {once:true});
   }).catch(function(err){
     arSay("Cámara bloqueada (" + err.name + ")", true);
     document.getElementById("arHint").textContent =
@@ -1583,7 +1710,8 @@ function stopAr(){
   if(arStream){ arStream.getTracks().forEach(function(t){ t.stop(); }); arStream = null; }
   arVideo.srcObject = null;
   if(arRenderer) arRenderer.clear();
-  smoothQuad = null;
+  if(octx) octx.clearRect(0, 0, arOv.width, arOv.height);
+  smoothQuad = null; lastPose = null;
   arSay("Detenida");
 }
 
