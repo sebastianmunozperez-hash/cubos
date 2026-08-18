@@ -202,6 +202,7 @@
             <button class="btn" id="btnArStop" type="button">Detener</button>
             <button class="btn" id="btnFlip" type="button">Voltear</button>
             <button class="btn" id="btnDiag" type="button">Diagnóstico</button>
+            <button class="btn" id="btnFov" type="button">Medir óptica</button>
           </div>
           <p class="hint" style="margin-top:8px">Si el modelo aparece del lado equivocado de la calle, toca Voltear.</p>
         </div>
@@ -211,7 +212,7 @@
             <label>Campo de visión<span id="fovOut" style="font-size:15px;color:var(--ink)">estimando</span></label>
             <label>Suavizado<input id="inSmooth" type="number" min="0" max="0.9" step="0.05" value="0.65"></label>
           </div>
-          <p class="hint" style="margin-top:8px">El campo de visión se calcula solo a partir del impreso. No hay que tocarlo.</p>
+          <p class="hint" style="margin-top:8px">Parte en 65°, junta 30 mediciones y ahí lo fija. Si cambias de teléfono, toca Medir óptica.</p>
         </div>
         <div class="cam-step">
           <h3><span>3</span> &nbsp;Otro impreso</h3>
@@ -1328,7 +1329,19 @@ var work = document.createElement("canvas");
 var wctx = work.getContext("2d", {willReadFrequently:true});
 var smoothQuad = null, lostFrames = 0, flip = 0, lastPose = null;
 var arSized = {w:0, h:0};
-var focalSuave = null, focalUsada = 0;
+var focalUsada = 0, focalMuestras = [], focalFija = null;
+var FOV_POR_DEFECTO = 65;
+
+function focalActual(w){
+  if(focalFija) return focalFija;
+  if(focalMuestras.length >= 8){
+    var m = focalMuestras.slice().sort(function(a,b){ return a-b; });
+    var med = m[m.length >> 1];
+    if(focalMuestras.length >= 30) focalFija = med;   // se congela
+    return med;
+  }
+  return (w/2) / Math.tan(FOV_POR_DEFECTO*Math.PI/180/2);
+}
 var ultInliers = 0, ultRasgos = 0, ultPares = 0, ultQuad = null;
 var arOv = document.getElementById("arOv");
 var octx = arOv ? arOv.getContext("2d") : null;
@@ -1921,15 +1934,24 @@ function arFrame(){
     var Himg = homographyFromPoints(ac, qq);
     if(!Himg) continue;
 
+    // La estimación cruda de cada cuadro salta entre 55° y 72° con un píxel de
+    // ruido. Para la pose se usa siempre la mediana acumulada, que se mueve
+    // entre 63° y 66°, y una vez juntadas 30 muestras se fija: la óptica del
+    // teléfono no cambia, así que seguir corrigiéndola solo mete temblor.
     var fEst = focalDesde(Himg, cx0, cy0);
-    var valido = fEst && isFinite(fEst) && fEst > work.width*0.35 && fEst < work.width*4;
-    var f = valido ? fEst : (focalSuave || work.width/2/Math.tan(65*Math.PI/180/2));
+    if(fEst && isFinite(fEst) && !focalFija){
+      var fovEst = 2*Math.atan(cx0/fEst)*180/Math.PI;
+      if(fovEst > 45 && fovEst < 85){
+        focalMuestras.push(fEst);
+        if(focalMuestras.length > 60) focalMuestras.shift();
+      }
+    }
+    var f = focalActual(work.width);
     var K = {fx:f, fy:f, cx:cx0, cy:cy0};
 
     var cand = poseFrom(Himg, K);
     if(cameraHeight(cand) > 0){
       pose = cand;
-      if(valido) focalSuave = focalSuave ? focalSuave*0.9 + fEst*0.1 : fEst;
       focalUsada = f;
       if(intento === 1) smoothQuad = qq;
       break;
@@ -1950,7 +1972,7 @@ function arFrame(){
   arCam.updateProjectionMatrix();
   if(fovEl){
     fovEl.textContent = (2*Math.atan(cx0/focalUsada)*180/Math.PI).toFixed(0) + "°"
-      + (focalSuave ? "" : " (provisorio)");
+      + (focalFija ? " fijo" : (focalMuestras.length >= 8 ? " (" + focalMuestras.length + "/30)" : " por defecto"));
   }
 
   pintarModelo();
@@ -2008,6 +2030,10 @@ function stopAr(){
 
 document.getElementById("btnAr").addEventListener("click", startAr);
 document.getElementById("btnArStop").addEventListener("click", stopAr);
+document.getElementById("btnFov").addEventListener("click", function(){
+  focalFija = null; focalMuestras = [];
+  arSay("Midiendo la óptica de nuevo");
+});
 document.getElementById("btnFlip").addEventListener("click", function(){
   flip = flip ? 0 : 1;
   smoothQuad = null;
